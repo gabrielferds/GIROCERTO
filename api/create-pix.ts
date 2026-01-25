@@ -10,23 +10,22 @@ const FIXED_PIX_KEY = 'gabrielferds044@gmail.com';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    return res.status(405).json({ error: 'Método não permitido' });
   }
 
   try {
     const { userId, email } = req.body;
 
     if (!userId) {
-      return res.status(400).json({ error: 'User ID is required' });
+      return res.status(400).json({ error: 'ID do usuário é obrigatório' });
     }
 
-    // Identificador único da transação
-    const paymentId = `IP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const paymentId = `GC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
-    // Código PIX estático simulado para a chave configurada
+    // Código PIX Estático para demonstração/suporte
     const pixCode = `00020126360014BR.GOV.BCB.PIX0125${FIXED_PIX_KEY}520400005303986540512.995802BR5910GiroCerto6009SaoPaulo62070503***6304${paymentId.slice(-4).toUpperCase()}`;
 
-    // Registro seguro no Supabase via Service Role
+    // Registro da intenção de pagamento no banco
     const { error } = await supabase.from('payments').insert({
       user_id: userId,
       gateway: 'infinitepay',
@@ -45,7 +44,7 @@ export default async function handler(req: any, res: any) {
       status: 'pendente'
     });
   } catch (err: any) {
-    console.error('Error in create-pix:', err);
-    return res.status(500).json({ error: err.message });
+    console.error('Erro na Vercel Function (create-pix):', err);
+    return res.status(500).json({ error: 'Erro interno ao gerar PIX' });
   }
 }

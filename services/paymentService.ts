@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 import { PixPaymentResponse } from '../types';
 
 /**
- * Serviço de integração com InfinitePay via Cloudflare Pages Functions.
+ * Serviço de integração com InfinitePay via Vercel API.
  */
 
 export const createPixPayment = async (userId: string, email: string): Promise<PixPaymentResponse> => {
@@ -16,12 +16,12 @@ export const createPixPayment = async (userId: string, email: string): Promise<P
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Falha ao gerar cobrança no Cloudflare.');
+      throw new Error(errorData.error || 'Erro ao conectar com a API de pagamentos.');
     }
 
     return await response.json();
   } catch (error) {
-    console.error("Erro ao gerar cobrança InfinitePay:", error);
+    console.error("Erro ao gerar PIX:", error);
     throw error;
   }
 };

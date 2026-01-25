@@ -8,16 +8,13 @@ const supabase = createClient(
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    return res.status(405).json({ error: 'Método não permitido' });
   }
 
   try {
-    const body = req.body;
-    const { payment_id, status } = body;
+    const { payment_id, status } = req.body;
 
-    // Lógica de validação do status enviado pela InfinitePay
     if (status === 'approved' || status === 'confirmed' || status === 'paid') {
-      // Busca o registro original do pagamento
       const { data: payment } = await supabase
         .from('payments')
         .select('user_id')
@@ -29,7 +26,7 @@ export default async function handler(req: any, res: any) {
         const planEnd = new Date();
         planEnd.setDate(planEnd.getDate() + 30);
 
-        // Atualiza pagamento para status final
+        // Atualização atômica do status de pagamento
         await supabase
           .from('payments')
           .update({ 
@@ -38,7 +35,7 @@ export default async function handler(req: any, res: any) {
           })
           .eq('payment_id', payment_id);
 
-        // Atualiza perfil do usuário para plano ativo
+        // Ativação do plano no perfil do motoboy
         await supabase
           .from('profiles')
           .update({
@@ -48,14 +45,12 @@ export default async function handler(req: any, res: any) {
             last_payment_id: payment_id
           })
           .eq('id', payment.user_id);
-          
-        console.log(`Plano ativado com sucesso para o usuário: ${payment.user_id}`);
       }
     }
 
     return res.status(200).json({ received: true });
   } catch (err: any) {
-    console.error('Webhook error:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error('Erro no Webhook (Vercel):', err.message);
+    return res.status(500).json({ error: 'Falha ao processar Webhook' });
   }
 }
