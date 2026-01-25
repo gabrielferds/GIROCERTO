@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { QrCode, Copy, CheckCircle2, ShieldCheck, Loader2, Wallet, RefreshCw, AlertCircle, Zap, ExternalLink } from 'lucide-react';
-import { supabase } from '../services/supabase';
-import { createPixPayment } from '../services/paymentService';
+import { QrCode, Copy, CheckCircle2, ShieldCheck, Loader2, RefreshCw, AlertCircle, Zap } from 'lucide-react';
+import { checkPaymentStatus, createPixPayment } from '../services/paymentService';
 import { PixPaymentResponse } from '../types';
 
 interface PaymentScreenProps {
@@ -36,6 +35,20 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
     initPayment();
   }, []);
 
+  // Polling para verificar se o Webhook já atualizou o banco
+  useEffect(() => {
+    let interval: any;
+    if (paymentData && !verifying) {
+      interval = setInterval(async () => {
+        const status = await checkPaymentStatus(paymentData.id);
+        if (status === 'pago') {
+          onPaymentSuccess();
+        }
+      }, 5000); // Checa a cada 5 segundos
+    }
+    return () => clearInterval(interval);
+  }, [paymentData, verifying]);
+
   const handleCopyCode = () => {
     if (paymentData?.qr_code) {
       navigator.clipboard.writeText(paymentData.qr_code);
@@ -44,46 +57,18 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
     }
   };
 
-  const handleConfirmPayment = async () => {
+  const handleManualVerify = async () => {
     if (!paymentData) return;
-    
     setVerifying(true);
     try {
-      /**
-       * Simulação do Webhook: 
-       * Em produção, o webhook da InfinitePay enviaria um POST para o Supabase.
-       * Aqui simulamos a confirmação imediata ao clicar para demonstrar o fluxo de liberação.
-       */
-      const isApproved = true; 
-
-      if (isApproved) {
-        const planStart = new Date().toISOString();
-        const planEnd = new Date();
-        planEnd.setDate(planEnd.getDate() + 30);
-
-        // 1. Atualiza status do pagamento
-        await supabase.from('payments').update({ 
-          status: 'pago',
-          confirmed_at: planStart
-        }).eq('payment_id', paymentData.id);
-        
-        // 2. Atualiza perfil do usuário com as novas datas do plano
-        await supabase
-          .from('profiles')
-          .update({ 
-            plan_status: 'active',
-            plano_inicio: planStart,
-            plano_fim: planEnd.toISOString(),
-            last_payment_id: paymentData.id
-          })
-          .eq('id', userId);
-
+      const status = await checkPaymentStatus(paymentData.id);
+      if (status === 'pago') {
         onPaymentSuccess();
       } else {
-        setError("Pagamento ainda não identificado pela InfinitePay.");
+        setError("Pagamento ainda não identificado. Aguarde um momento.");
       }
     } catch (err) {
-      setError("Erro ao processar liberação. Contate o suporte.");
+      setError("Erro ao processar. Tente novamente.");
     } finally {
       setVerifying(false);
     }
@@ -106,7 +91,7 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
 
           <h2 className="text-2xl font-black text-slate-800 mb-2 leading-tight">Renove seu Giro</h2>
           <p className="text-slate-400 text-sm font-medium mb-8 leading-relaxed">
-            Seu corre não pode parar! Garanta mais 30 dias de controle total por apenas R$ 12,99.
+            Seu corre não pode parar! Garanta mais 30 dias de controle total.
           </p>
 
           <div className="bg-indigo-50 rounded-3xl p-6 mb-8 border border-indigo-100/50">
@@ -114,13 +99,12 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
               <span className="text-indigo-900 font-black text-4xl">R$ 12,99</span>
               <span className="text-indigo-400 font-bold text-sm">/mês</span>
             </div>
-            <p className="text-[9px] font-black uppercase text-indigo-400 mt-2 tracking-widest">Plano Mensal via PIX</p>
           </div>
 
           {loading ? (
             <div className="py-12 flex flex-col items-center gap-4">
               <Loader2 className="animate-spin text-indigo-600" size={32} />
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conectando InfinitePay...</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conectando Servidor...</p>
             </div>
           ) : error ? (
             <div className="py-8 space-y-4">
@@ -129,7 +113,7 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
                 <p className="text-xs font-bold text-left">{error}</p>
               </div>
               <button onClick={initPayment} className="text-indigo-600 text-xs font-black uppercase flex items-center gap-2 justify-center w-full">
-                <RefreshCw size={14} /> GERAR NOVO CÓDIGO
+                <RefreshCw size={14} /> TENTAR NOVAMENTE
               </button>
             </div>
           ) : (
@@ -140,17 +124,12 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
                     <QrCode size={100} className="text-slate-300" />
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Escaneie o QR Code</p>
-                  <p className="text-[9px] font-bold text-slate-300">Vinculado à chave: gabrielferds044@gmail.com</p>
-                </div>
-                
                 <button 
                   onClick={handleCopyCode}
-                  className="w-full py-4 mt-4 bg-white border border-slate-200 hover:border-indigo-500 text-slate-600 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
+                  className="w-full py-4 bg-white border border-slate-200 hover:border-indigo-500 text-slate-600 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
                 >
                   {copied ? (
-                    <><CheckCircle2 size={16} className="text-emerald-500" /> COPIADO COM SUCESSO!</>
+                    <><CheckCircle2 size={16} className="text-emerald-500" /> COPIADO!</>
                   ) : (
                     <><Copy size={16} /> COPIAR CÓDIGO PIX</>
                   )}
@@ -160,16 +139,16 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
               <div className="flex items-start gap-3 text-left bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
                 <ShieldCheck size={18} className="text-emerald-500 shrink-0 mt-0.5" />
                 <p className="text-[10px] font-medium text-emerald-700 leading-tight">
-                  Pagamento confirmado via PIX! Liberação instantânea após processamento da InfinitePay.
+                  A liberação é automática via InfinitePay. Se já pagou, aguarde alguns segundos ou clique abaixo.
                 </p>
               </div>
 
               <button 
                 disabled={verifying}
-                onClick={handleConfirmPayment}
+                onClick={handleManualVerify}
                 className="w-full py-5 bg-slate-900 text-white font-black rounded-3xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2"
               >
-                {verifying ? <Loader2 size={20} className="animate-spin" /> : 'PAGAMENTO REALIZADO'}
+                {verifying ? <Loader2 size={20} className="animate-spin" /> : 'VERIFICAR PAGAMENTO'}
               </button>
             </div>
           )}
@@ -177,13 +156,9 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
       </div>
       
       <div className="mt-8 text-center">
-        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4 flex items-center justify-center gap-1">
-          <ShieldCheck size={12} className="text-indigo-400" />
-          Ambiente Seguro InfinitePay
+        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">
+          InfinitePay • Chave fixa de suporte: gabrielferds044@gmail.com
         </p>
-        <button onClick={() => window.location.reload()} className="text-[10px] text-indigo-600 font-black uppercase underline">
-          Voltar e tentar mais tarde
-        </button>
       </div>
     </div>
   );
