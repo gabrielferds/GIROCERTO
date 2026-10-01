@@ -1,21 +1,19 @@
 
 import { supabase } from './supabase';
-import { PixPaymentResponse } from '../types';
-
-/**
- * Serviço de integração com InfinitePay via Vercel API.
- */
-
-export const createPixPayment = async (userId: string, email: string): Promise<PixPaymentResponse> => {
-  throw new Error('Pagamento PIX ainda não disponível. A integração de cobrança precisa ser concluída.');
-};
-
-export const checkPaymentStatus = async (paymentId: string): Promise<string> => {
-  const { data } = await supabase
-    .from('payments')
-    .select('status')
-    .eq('payment_id', paymentId)
-    .single();
-
-  return data?.status || 'pendente';
-};
+export interface PixCharge {
+  id: string; status: string; amount: number; qrCode: string | null;
+  qrCodeBase64: string | null; expiresAt: string; activated: boolean;
+}
+async function call<T>(body: object): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('girocerto-payments', { body });
+  if (error) {
+    let message = 'Não foi possível acessar o pagamento. Tente novamente.';
+    try { message = (await error.context?.json())?.error || message; } catch { /* preserve message */ }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
+export const paymentConfiguration = () => call<{ready:boolean}>({action:'config'});
+export const createPixPayment = () => call<PixCharge>({action:'create'});
+export const checkPaymentStatus = (id: string) => call<PixCharge>({action:'status',id});
