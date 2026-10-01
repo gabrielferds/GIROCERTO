@@ -8,7 +8,7 @@ import {
 
 interface DebtManagerProps {
   debts: ExpenseDebt[];
-  onUpdate: (debts: ExpenseDebt[]) => void;
+  onUpdate: (debts: ExpenseDebt[]) => void | boolean | Promise<void | boolean>;
   plannedWorkDays: number;
 }
 
@@ -33,17 +33,17 @@ const DebtManager: React.FC<DebtManagerProps> = ({ debts, onUpdate, plannedWorkD
   const monthlyTotal = activeDebts.reduce((acc, curr) => acc + curr.installmentValue, 0);
   const dailyImpact = plannedWorkDays > 0 ? monthlyTotal / plannedWorkDays : 0;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.name || formData.installmentValue <= 0) return;
 
     if (editingId) {
-      onUpdate(debts.map(d => d.id === editingId ? { ...formData, id: editingId } : d));
+      if (await onUpdate(debts.map(d => d.id === editingId ? { ...formData, id: editingId } : d)) === false) return;
     } else {
       const newDebt: ExpenseDebt = {
         ...formData,
-        id: Math.random().toString(36).substr(2, 9)
+        id: crypto.randomUUID()
       };
-      onUpdate([...debts, newDebt]);
+      if (await onUpdate([...debts, newDebt]) === false) return;
     }
     resetForm();
   };
