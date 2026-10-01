@@ -54,30 +54,24 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
         email: formData.email,
         password: formData.password,
         options: {
+          emailRedirectTo: window.location.origin,
           data: {
             full_name: formData.name,
+
           },
         },
       });
 
       if (signUpError) throw signUpError;
 
-      if (data.user) {
-        // Trial expires in 30 days
-        const trialExpiresAt = addDays(new Date(), 30).toISOString();
+      if (data.user && !data.session) {
+        setStep('login');
+        setError('Conta criada. Confirme seu e-mail antes de entrar.');
+        return;
+      }
 
-        // Criar perfil inicial na tabela profiles
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({ 
-            id: data.user.id, 
-            name: formData.name,
-            planned_work_days: 22,
-            plan_status: 'trial',
-            trial_expires_at: trialExpiresAt
-          });
-          
-        if (profileError) console.error("Erro ao criar perfil:", profileError);
+      if (data.user && data.session) {
+        // O perfil é criado pelo trigger da Supabase, inclusive com confirmação por e-mail.
         setStep('onboarding');
       }
     } catch (err: any) {
@@ -163,7 +157,8 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
               <Lock size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 
                 required
-                type="password" 
+                type="password"
+                minLength={6} 
                 placeholder="Sua Senha" 
                 className="w-full bg-white border-none rounded-2xl p-5 pl-12 text-sm font-bold shadow-sm focus:ring-2 focus:ring-orange-500 outline-none"
                 value={formData.password}
@@ -244,7 +239,7 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
 
             <div className="space-y-4 mb-10 text-left">
               {[
-                "30 dias de teste gratuito",
+                "3 dias de teste gratuito após o cadastro",
                 "Dashboards de lucro real",
                 "Metas inteligentes ilimitadas",
                 "Controle de dívidas e boletos",
@@ -263,11 +258,12 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
               <p className="text-slate-400 text-xs font-bold uppercase mb-1">Após o teste:</p>
               <div className="flex items-baseline justify-center gap-1">
                 <span className="text-slate-900 font-black text-4xl">R$ 12,99</span>
-                <span className="text-slate-400 font-bold text-sm">/mês</span>
+                <span className="text-slate-400 font-bold text-sm">/30 dias</span>
               </div>
               <p className="text-[10px] text-orange-500 font-black uppercase mt-3 tracking-widest">
-                AVISAREMOS ANTES DE QUALQUER COBRANÇA
+                RENOVE POR R$ 10,00 NOS ÚLTIMOS 2 DIAS DO PLANO
               </p>
+              <p className="text-xs text-slate-500 mt-3">Primeiro pagamento: R$ 12,99. No vencimento, a renovação custa R$ 12,99. Pagamento por PIX, sem débito automático.</p>
             </div>
           </div>
         </div>

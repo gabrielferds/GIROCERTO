@@ -12,7 +12,7 @@ const COMMON_ITEMS = [
 
 interface MaintenanceCalculatorProps {
   items: MaintenanceItem[];
-  onUpdate: (items: MaintenanceItem[]) => void;
+  onUpdate: (items: MaintenanceItem[]) => void | boolean | Promise<void | boolean>;
   workDaysCount: number;
   plannedWorkDays: number;
   onUpdateWorkDays: (val: number) => void;
@@ -26,7 +26,7 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({ items, on
   const totalAnnual = items.reduce((acc, curr) => acc + (curr.qtyPerYear * curr.unitValue), 0);
   const dailyReserve = (totalAnnual / 12) / Math.max(1, plannedWorkDays);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.name) return;
 
     if (editingId) {
@@ -34,11 +34,11 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({ items, on
       const updatedItems = items.map(item => 
         item.id === editingId ? { ...formData, id: editingId } : item
       );
-      onUpdate(updatedItems);
+      if (await onUpdate(updatedItems) === false) return;
     } else {
       // Add new item
-      const newItem: MaintenanceItem = { ...formData, id: Math.random().toString(36).substr(2, 9) };
-      onUpdate([...items, newItem]);
+      const newItem: MaintenanceItem = { ...formData, id: crypto.randomUUID() };
+      if (await onUpdate([...items, newItem]) === false) return;
     }
     
     closeForm();
@@ -56,14 +56,14 @@ const MaintenanceCalculator: React.FC<MaintenanceCalculatorProps> = ({ items, on
     setFormData({ name: '', qtyPerYear: 1, unitValue: 0 });
   };
 
-  const handleQuickAdd = (ci: { name: string, qty: number, price: number }) => {
+  const handleQuickAdd = async (ci: { name: string, qty: number, price: number }) => {
     const newItem: MaintenanceItem = { 
       name: ci.name, 
       qtyPerYear: ci.qty, 
       unitValue: ci.price, 
-      id: Math.random().toString(36).substr(2, 9) 
+      id: crypto.randomUUID() 
     };
-    onUpdate([...items, newItem]);
+    if (await onUpdate([...items, newItem]) === false) return;
   };
 
   return (

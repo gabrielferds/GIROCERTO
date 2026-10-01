@@ -18,7 +18,7 @@ interface BikeManagerProps {
   replacementGoal: ReplacementGoal | null;
   onUpdateGoal: (goal: ReplacementGoal) => void;
   maintenanceItems: MaintenanceItem[];
-  onUpdateMaintenance: (items: MaintenanceItem[]) => void;
+  onUpdateMaintenance: (items: MaintenanceItem[]) => void | boolean | Promise<void | boolean>;
   workDaysCount: number;
   plannedWorkDays: number;
   onUpdateWorkDays: (val: number) => void;

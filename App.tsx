@@ -11,7 +11,10 @@ import DebtManager from './components/DebtManager';
 import NotificationOverlay from './components/NotificationOverlay';
 import InitialFlow from './components/InitialFlow';
 import PaymentScreen from './components/PaymentScreen';
+import PlanNotice from './components/PlanNotice';
+import { planTiming } from './services/billingPolicy.mjs';
 import { supabase } from './services/supabase';
+import * as db from './services/dataService';
 import { format, startOfMonth, endOfMonth, parseISO, subDays, isAfter, isBefore } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Trash2, AlertCircle, Target, Plus, Sparkles, RefreshCcw, Info, CheckCircle2, X, LogOut, Wallet } from 'lucide-react';
@@ -31,7 +34,45 @@ const App: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string>('');
   const [userId, setUserId] = useState<string | null>(null);
   const [planStatus, setPlanStatus] = useState<PlanStatus>('trial');
-  const [isExpired, setIsExpired] = useState(false);
+  const [planExpiresAt,setPlanExpiresAt] = useState<string|null>(null);
+  const [isFirstMonth,setIsFirstMonth] = useState(true);
+  const [clock,setClock] = useState(Date.now());
+  const isExpired = planTiming(planExpiresAt,isFirstMonth,clock).expired;
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(()=>{
+    const tick=()=>setClock(Date.now());
+    const timer=window.setInterval(tick,30000);
+    window.addEventListener('focus',tick);
+    return ()=>{window.clearInterval(timer);window.removeEventListener('focus',tick);};
+  },[]);
+
+
+  useEffect(() => {
+    const context = (document as any).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    try {
+      void Promise.resolve(context.registerTool({
+        name: 'open_girocerto_view',
+        title: 'Abrir uma tela do GiroCerto',
+        description: 'Abre uma tela para o usuário autenticado. Não salva nem exclui registros.',
+        inputSchema: { type: 'object', properties: { view: { type: 'string', enum: ['dashboard','calendar','history','add','goals','maintenance','debts','insights'] } }, required: ['view'], additionalProperties: false },
+        annotations: { readOnlyHint: false },
+        execute: async (input: any) => {
+          const views = ['dashboard','calendar','history','add','goals','maintenance','debts','insights'];
+          if (!input || !views.includes(input.view)) throw new Error('Tela inválida.');
+          if (!isAuthComplete) throw new Error('Entre na sua conta primeiro.');
+          setActiveView(input.view);
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return { view: input.view };
+        }
+      }, { signal: lifecycle.signal })).catch(console.error);
+    } catch (error) { console.error(error); }
+    return () => lifecycle.abort();
+  }, [isAuthComplete]);
 
   // Auth Session Management
   useEffect(() => {
@@ -40,11 +81,11 @@ const App: React.FC = () => {
         setUserId(session.user.id);
         setUserEmail(session.user.email || '');
         setIsAuthComplete(true);
-        fetchUserData(session.user.id);
+        setTimeout(() => { void fetchUserData(session.user.id); }, 0);
       } else {
         setUserId(null);
         setIsAuthComplete(false);
-        setIsExpired(false);
+        setPlanExpiresAt(null);
       }
     });
 
@@ -52,137 +93,69 @@ const App: React.FC = () => {
   }, []);
 
   const fetchUserData = async (uid: string) => {
-    // 1. Profile
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single();
-    if (profile) {
-      setUserName(profile.name);
-      setPlannedWorkDays(profile.planned_work_days);
-      setPlanStatus(profile.plan_status || 'trial');
-      
-      const now = new Date();
-      if (profile.plan_status === 'active') {
-        if (profile.plano_fim) {
-          const expiresAt = parseISO(profile.plano_fim);
-          if (isBefore(expiresAt, now)) {
-            setIsExpired(true);
-            setPlanStatus('expired');
-          }
-        }
-      } else {
-        const trialExpiresAt = parseISO(profile.trial_expires_at);
-        if (isBefore(trialExpiresAt, now)) {
-          setIsExpired(true);
-          setPlanStatus('expired');
-        }
-      }
-    }
-
-    // 2. Entries
-    const { data: entriesData } = await supabase.from('entries').select('*').eq('user_id', uid).order('date', { ascending: false });
-    if (entriesData) setEntries(entriesData);
-
-    // 3. Maintenance
-    const { data: maintData } = await supabase.from('maintenance').select('*').eq('user_id', uid);
-    if (maintData) setMaintenanceItems(maintData);
-
-    // 4. Bike
-    const { data: bikeData } = await supabase.from('bike_info').select('*').eq('user_id', uid).single();
-    if (bikeData) setBikeInfo(bikeData);
-
-    // 5. Replacement Goal
-    const { data: replGoalData } = await supabase.from('replacement_goals').select('*').eq('user_id', uid).single();
-    if (replGoalData) setReplacementGoal(replGoalData);
-
-    // 6. Debts
-    const { data: debtsData } = await supabase.from('debts').select('*').eq('user_id', uid);
-    if (debtsData) setDebts(debtsData);
+    setDataLoading(true);
+    setDataError(null);
+    try {
+      const data = await db.loadData(uid);
+      setUserName(data.profile.name || 'Motoboy');
+      setPlannedWorkDays(data.profile.planned_work_days);
+      const expiry = data.profile.plan_expiry_date;
+      const expired = Boolean(expiry && isBefore(parseISO(expiry), new Date()));
+      setPlanExpiresAt(expiry || null);
+      setIsFirstMonth(data.profile.is_first_month !== false);
+      setClock(Date.now());
+      setPlanStatus(expired ? 'expired' : (data.profile.plan_status || 'trial'));
+      setEntries(data.entries); setMaintenanceItems(data.maintenance);
+      setBikeInfo(data.bike as BikeInfo | null);
+      setReplacementGoal(data.replacementGoal as ReplacementGoal | null);
+      setDebts(data.debts); setGoals(data.goals);
+    } catch (error: any) {
+      setDataError('Não foi possível carregar seus dados. ' + (error.message || 'Tente novamente.'));
+    } finally { setDataLoading(false); }
   };
 
+  const persist = async (action: () => Promise<void>) => {
+    if (!userId || dataLoading || isExpired) return false;
+    setDataError(null); setSaving(true);
+    try { await action(); return true; }
+    catch (error: any) { setDataError('Não foi possível salvar. ' + (error.message || 'Tente novamente.')); return false; }
+    finally { setSaving(false); }
+  };
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) { setDataError(error.message); return; }
+    setEntries([]);setMaintenanceItems([]);setBikeInfo(null);setReplacementGoal(null);setDebts([]);setUserName('');setDataError(null);
   };
-
-  const handlePaymentSuccess = () => {
-    setPlanStatus('active');
-    setIsExpired(false);
-    setActiveView('dashboard');
-    if (userId) fetchUserData(userId);
-  };
-
+  const handlePaymentSuccess = () => { if(userId) void fetchUserData(userId); setActiveView('dashboard'); };
   const handleUpdatePlannedWorkDays = async (val: number) => {
-    if (isExpired) return;
-    setPlannedWorkDays(val);
-    if (userId) {
-      await supabase.from('profiles').update({ planned_work_days: val }).eq('id', userId);
-    }
+    if(!Number.isInteger(val) || val<1 || val>31) {setDataError('Informe de 1 a 31 dias de trabalho.');return;}
+    await persist(async()=>{await db.saveWorkDays(userId!,val);setPlannedWorkDays(val);});
   };
-
   const handleUpdateMaintenanceItems = async (items: MaintenanceItem[]) => {
-    if (isExpired) return;
-    setMaintenanceItems(items);
-    if (userId) {
-      await supabase.from('maintenance').delete().eq('user_id', userId);
-      await supabase.from('maintenance').insert(items.map(i => ({ ...i, user_id: userId })));
-    }
+    return await persist(async()=>{await db.saveMaintenance(items);setMaintenanceItems(items);});
   };
-
   const handleUpdateBikeInfo = async (info: BikeInfo) => {
-    if (isExpired) return;
-    setBikeInfo(info);
-    if (userId) {
-      await supabase.from('bike_info').upsert({ ...info, user_id: userId });
-    }
+    await persist(async()=>{await db.saveBike(userId!,info);setBikeInfo(info);});
   };
-
   const handleUpdateReplacementGoal = async (goal: ReplacementGoal | null) => {
-    if (isExpired) return;
-    setReplacementGoal(goal);
-    if (userId) {
-      if (!goal) {
-        await supabase.from('replacement_goals').delete().eq('user_id', userId);
-      } else {
-        await supabase.from('replacement_goals').upsert({ ...goal, user_id: userId });
-      }
-    }
+    await persist(async()=>{await db.saveReplacement(userId!,goal);setReplacementGoal(goal);});
   };
-
   const handleUpdateDebts = async (newDebts: ExpenseDebt[]) => {
-    if (isExpired) return;
-    setDebts(newDebts);
-    if (userId) {
-      await supabase.from('debts').delete().eq('user_id', userId);
-      await supabase.from('debts').insert(newDebts.map(d => ({ ...d, user_id: userId })));
-    }
+    return await persist(async()=>{await db.saveDebts(newDebts);setDebts(newDebts);});
   };
-
   const handleSaveEntry = async (newEntry: DailyEntry) => {
-    if (isExpired) {
-      setActiveView('payment');
-      return;
-    }
-
-    const updatedEntries = [...entries];
-    const existingIndex = updatedEntries.findIndex(e => e.date === newEntry.date);
-    
-    if (existingIndex !== -1) {
-      updatedEntries[existingIndex] = newEntry;
-    } else {
-      updatedEntries.unshift(newEntry);
-    }
-    
-    setEntries(updatedEntries);
-    if (userId) {
-      await supabase.from('entries').upsert({ ...newEntry, user_id: userId });
-    }
-    setActiveView('dashboard');
+    if(isExpired) {setActiveView('payment');return;}
+    await persist(async()=>{
+      const saved = await db.saveEntry(userId!,newEntry);
+      setEntries(previous=>[saved,...previous.filter(e=>e.date!==saved.date)].sort((a,b)=>b.date.localeCompare(a.date)));
+      setSelectedDate(new Date());setActiveView('dashboard');
+    });
   };
-
   const deleteEntry = async (id: string) => {
-    if (isExpired) return;
-    setEntries(entries.filter(e => e.id !== id));
-    if (userId) {
-      await supabase.from('entries').delete().eq('id', id);
-    }
+    await persist(async()=>{await db.removeEntry(userId!,id);setEntries(previous=>previous.filter(e=>e.id!==id));});
+  };
+  const handleSaveGoals = async () => {
+    await persist(async()=>{await db.saveGoals(userId!,goals);setActiveView('dashboard');});
   };
 
   const suggestedGoals = useMemo(() => {
@@ -219,8 +192,8 @@ const App: React.FC = () => {
     };
   }, [entries, maintenanceItems, bikeInfo, replacementGoal, plannedWorkDays, debts]);
 
-  if (isAuthComplete === null) return null;
-  if (!isAuthComplete) return <InitialFlow onComplete={() => setIsAuthComplete(true)} />;
+  if (isAuthComplete === null) return <div className="min-h-screen flex items-center justify-center text-slate-600" role="status">Carregando seu Giro…</div>;
+  if (!isAuthComplete) return <InitialFlow onComplete={() => { void supabase.auth.getSession().then(({ data }) => setIsAuthComplete(Boolean(data.session))); }} />;
   
   if (isExpired && userId && activeView === 'add') {
     return <PaymentScreen userId={userId} userName={userName} userEmail={userEmail} onPaymentSuccess={handlePaymentSuccess} />;
@@ -231,25 +204,6 @@ const App: React.FC = () => {
       case 'dashboard':
         return (
           <div className="space-y-4 animate-in fade-in duration-500">
-            {isExpired && (
-              <div className="bg-red-50 p-4 rounded-3xl border border-red-100 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="bg-red-500 p-2 rounded-xl text-white shadow-sm">
-                    <AlertCircle size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black text-red-900 leading-tight">Plano Expirado</p>
-                    <p className="text-[10px] font-medium text-red-600">Renove para lançar novos ganhos.</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setActiveView('payment')}
-                  className="bg-red-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shadow-sm shadow-red-200"
-                >
-                  RENOVAR
-                </button>
-              </div>
-            )}
             <div className="flex justify-between items-end mb-2 px-1">
               <div className="flex flex-col gap-1">
                 <span className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Salve, {userName.split(' ')[0]}!</span>
@@ -346,7 +300,7 @@ const App: React.FC = () => {
           </div>
         );
       case 'add':
-        return <QuickEntry initialDate={selectedDate} onSave={handleSaveEntry} onCancel={() => { setSelectedDate(new Date()); setActiveView('dashboard'); }} />;
+        return <QuickEntry entries={entries} initialDate={selectedDate} onSave={handleSaveEntry} onCancel={() => { setSelectedDate(new Date()); setActiveView('dashboard'); }} />;
       case 'insights':
         return <InsightPanel entries={entries} goals={goals} />;
       case 'payment':
@@ -385,7 +339,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
              </div>
-             <button onClick={() => setActiveView('dashboard')} className="w-full py-5 bg-slate-900 text-white font-black rounded-[1.5rem] shadow-xl text-sm tracking-widest">SALVAR E VOLTAR</button>
+             <button onClick={handleSaveGoals} className="w-full py-5 bg-slate-900 text-white font-black rounded-[1.5rem] shadow-xl text-sm tracking-widest">SALVAR E VOLTAR</button>
           </div>
         );
       default:
@@ -396,7 +350,10 @@ const App: React.FC = () => {
   return (
     <Layout activeView={activeView} setActiveView={setActiveView}>
       <NotificationOverlay entries={entries} onAction={() => setActiveView('add')} />
-      {renderContent()}
+      {dataError && <div role="alert" className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-2xl mb-4 text-sm">{dataError}<button className="ml-3 underline font-bold" onClick={() => userId && void fetchUserData(userId)}>Recarregar dados</button></div>}
+      {(dataLoading || saving) && <p role="status" className="text-sm text-slate-500 mb-3">{saving ? 'Salvando…' : 'Carregando seus dados…'}</p>}
+      {!dataLoading && activeView!=='payment' && <PlanNotice expiresAt={planExpiresAt} isFirstMonth={isFirstMonth} now={clock} onPay={()=>setActiveView('payment')} />}
+      <div aria-busy={dataLoading || saving} className={dataLoading || saving ? 'pointer-events-none opacity-60' : ''}>{renderContent()}</div>
     </Layout>
   );
 };

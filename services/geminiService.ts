@@ -4,7 +4,7 @@ import { DailyEntry } from "../types";
 
 export const getFinancialInsights = async (entries: DailyEntry[]) => {
   // Ensure the AI client is initialized with the correct configuration
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = null;
   
   const summary = entries.map(e => ({
     date: e.date,
@@ -26,42 +26,13 @@ export const getFinancialInsights = async (entries: DailyEntry[]) => {
   `;
 
   try {
-    // Correct usage of generateContent with responseSchema and responseMimeType
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            message: {
-              type: Type.STRING,
-              description: 'Motivational message for the user.',
-            },
-            tip: {
-              type: Type.STRING,
-              description: 'A practical financial or work tip.',
-            },
-            projection: {
-              type: Type.STRING,
-              description: 'Projected monthly earnings.',
-            },
-          },
-          required: ["message", "tip", "projection"],
-        },
-      },
-    });
-
-    // Access text property directly
-    const jsonStr = response.text || "{}";
-    return JSON.parse(jsonStr.trim());
+    throw new Error("A análise por IA ainda precisa de configuração no servidor.");
   } catch (error) {
     console.error("Error fetching insights:", error);
     return {
       message: "Bora pra cima! Cada entrega te deixa mais perto do seu objetivo.",
       tip: "Mantenha a moto em dia para não ter surpresas no meio do corre.",
-      projection: "Calculando..."
+      projection: "Análise por IA ainda não disponível."
     };
   }
 };

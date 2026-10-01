@@ -1,17 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
 import { DailyEntry, ExpenseCategory, AppEarning, CategoryExpense } from '../types';
+import { format } from 'date-fns';
 import { APP_LIST } from '../constants';
 import { Save, Plus, X, Trash2, Fuel, Wrench, Wifi, MoreHorizontal, AlertCircle, Clock, Edit3, Check } from 'lucide-react';
 
 interface EntryFormProps {
   initialDate?: Date;
+  entries?: DailyEntry[];
   onSave: (entry: DailyEntry) => void;
   onCancel: () => void;
 }
 
-const QuickEntry: React.FC<EntryFormProps> = ({ initialDate = new Date(), onSave, onCancel }) => {
-  const [date, setDate] = useState(initialDate.toISOString().split('T')[0]);
+const QuickEntry: React.FC<EntryFormProps> = ({ initialDate = new Date(), entries = [], onSave, onCancel }) => {
+  const [date, setDate] = useState(format(initialDate, 'yyyy-MM-dd'));
   const [status, setStatus] = useState<'work' | 'off'>('work');
   const [earnings, setEarnings] = useState<AppEarning[]>([{ app: 'iFood', amount: 0 }]);
   const [expenses, setExpenses] = useState<CategoryExpense[]>([]);
@@ -20,15 +22,15 @@ const QuickEntry: React.FC<EntryFormProps> = ({ initialDate = new Date(), onSave
   const [notes, setNotes] = useState('');
   const [editingEarningIndex, setEditingEarningIndex] = useState<number | null>(null);
 
-  // Sync fuelCost with expenses array
   useEffect(() => {
-    const otherExpenses = expenses.filter(e => e.category !== ExpenseCategory.FUEL);
-    if (fuelCost > 0) {
-      setExpenses([...otherExpenses, { category: ExpenseCategory.FUEL, amount: fuelCost }]);
-    } else {
-      setExpenses(otherExpenses);
-    }
-  }, [fuelCost]);
+    const entry = entries.find(e => e.date === date);
+    setStatus(entry?.status || 'work');
+    setEarnings(entry?.earnings.length ? entry.earnings.map(e=>({...e})) : [{app:'iFood',amount:0}]);
+    setExpenses(entry?.expenses.map(e=>({...e})) || []);
+    setHours(entry?.hoursWorked || 0);
+    setFuelCost(entry?.expenses.find(e=>e.category===ExpenseCategory.FUEL)?.amount || 0);
+    setNotes(entry?.notes || '');
+  }, [date]);
 
   const addEarning = () => {
     setEarnings([...earnings, { app: 'Novo Ganho', amount: 0 }]);
@@ -57,7 +59,7 @@ const QuickEntry: React.FC<EntryFormProps> = ({ initialDate = new Date(), onSave
 
   const handleSave = () => {
     const entry: DailyEntry = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       date,
       status,
       earnings: earnings.filter(e => e.amount > 0),
@@ -195,7 +197,7 @@ const QuickEntry: React.FC<EntryFormProps> = ({ initialDate = new Date(), onSave
                     <input 
                       type="number"
                       value={fuelCost || ''}
-                      onChange={(e) => setFuelCost(parseFloat(e.target.value) || 0)}
+                      onChange={(e) => { const value = parseFloat(e.target.value) || 0; setFuelCost(value); handleExpenseChange(ExpenseCategory.FUEL, value); }}
                       placeholder="0.00"
                       className="w-full bg-slate-50 border-none rounded-2xl p-4 pl-10 text-sm font-bold focus:ring-2 focus:ring-orange-500 outline-none text-red-500"
                     />

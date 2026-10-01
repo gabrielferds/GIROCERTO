@@ -1,8 +1,7 @@
-
-import React, { useState, useEffect } from 'react';
-import { QrCode, Copy, CheckCircle2, ShieldCheck, Loader2, RefreshCw, AlertCircle, Zap } from 'lucide-react';
-import { checkPaymentStatus, createPixPayment } from '../services/paymentService';
-import { PixPaymentResponse } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Copy, CheckCircle2, Wallet } from 'lucide-react';
+import { PIX_KEY } from '../config/payment';
+import { paymentConfiguration, createPixPayment, checkPaymentStatus, PixCharge, PlanQuote } from '../services/paymentService';
 
 interface PaymentScreenProps {
   userId: string;
@@ -11,154 +10,132 @@ interface PaymentScreenProps {
   onPaymentSuccess: () => void;
 }
 
-const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEmail, onPaymentSuccess }) => {
-  const [loading, setLoading] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [paymentData, setPaymentData] = useState<PixPaymentResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const initPayment = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const resp = await createPixPayment(userId, userEmail);
-      setPaymentData(resp);
-    } catch (err) {
-      setError("Erro ao gerar PIX com InfinitePay. Tente novamente.");
-    } finally {
-      setLoading(false);
-    }
+const PaymentScreen: React.FC<PaymentScreenProps> = ({userId,onPaymentSuccess}) => {
+  const [ready,setReady] = useState<boolean | null>(null);
+  const [quote,setQuote] = useState<PlanQuote|null>(null);
+  const [charge,setCharge] = useState<PixCharge | null>(null);
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
+  const [now,setNow] = useState(Date.now());
+  const checking = useRef(false);
+  const success = useRef(onPaymentSuccess);
+  success.current = onPaymentSuccess;
+  const storageKey = `girocerto:pix:${userId}`;
+  const expired = Boolean(charge && new Date(charge.expiresAt).getTime() <= now);
+  const canceled = ['canceled','failed','expired'].includes(charge?.status || '');
+  const chargeValid=Boolean(charge && !expired && !canceled && !charge.activated);
+  const quoteEarly=Boolean(quote?.earlyRenewal && quote.planExpiresAt && new Date(quote.planExpiresAt).getTime()>now);
+  const amount=chargeValid?charge!.amount:quoteEarly?10:12.99;
+  const acceptCharge = (next:PixCharge) => {
+    setCharge(next);
+    if(next.activated) { localStorage.removeItem(storageKey); success.current(); }
   };
-
-  useEffect(() => {
-    initPayment();
-  }, []);
-
-  // Polling para verificar se o Webhook já atualizou o banco
-  useEffect(() => {
-    let interval: any;
-    if (paymentData && !verifying) {
-      interval = setInterval(async () => {
-        const status = await checkPaymentStatus(paymentData.id);
-        if (status === 'pago') {
-          onPaymentSuccess();
-        }
-      }, 5000); // Checa a cada 5 segundos
-    }
-    return () => clearInterval(interval);
-  }, [paymentData, verifying]);
-
-  const handleCopyCode = () => {
-    if (paymentData?.qr_code) {
-      navigator.clipboard.writeText(paymentData.qr_code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const handleManualVerify = async () => {
-    if (!paymentData) return;
-    setVerifying(true);
-    try {
-      const status = await checkPaymentStatus(paymentData.id);
-      if (status === 'pago') {
-        onPaymentSuccess();
-      } else {
-        setError("Pagamento ainda não identificado. Aguarde um momento.");
+  useEffect(()=>{
+    let mounted=true;
+    paymentConfiguration().then(async config=>{
+      if(!mounted)return;
+      setReady(config.ready);
+      setQuote(config);
+      const id=localStorage.getItem(storageKey);
+      if(config.ready && id){
+        try{ const existing=await checkPaymentStatus(id); if(mounted) acceptCharge(existing); }
+        catch{localStorage.removeItem(storageKey);}
       }
-    } catch (err) {
-      setError("Erro ao processar. Tente novamente.");
-    } finally {
-      setVerifying(false);
+    }).catch(()=>{if(mounted){setReady(false);setError('Não foi possível consultar o pagamento automático. Tente atualizar a página.');}});
+    return ()=>{mounted=false;};
+  },[userId]);
+  useEffect(()=>{
+    const timer=window.setInterval(()=>{setNow(Date.now());void paymentConfiguration().then(config=>{setReady(config.ready);setQuote(config);}).catch(()=>{});},60000);
+    return ()=>window.clearInterval(timer);
+  },[userId]);
+  useEffect(()=>{
+    if(!charge || charge.activated || canceled)return;
+    let mounted=true;
+    const poll=async()=>{
+      if(checking.current || document.hidden)return;
+      checking.current=true;
+      try{const next=await checkPaymentStatus(charge.id);if(mounted){setError('');acceptCharge(next);}}
+      catch(e){if(mounted)setError(e instanceof Error?e.message:'Não foi possível consultar o pagamento.');}
+      finally{checking.current=false;}
+    };
+    const timer=window.setInterval(()=>{setNow(Date.now());void poll();},8000);
+    window.addEventListener('focus',poll);
+    return ()=>{mounted=false;window.clearInterval(timer);window.removeEventListener('focus',poll);};
+  },[charge?.id,canceled]);
+  const generate=async()=>{
+    if(busy)return;
+    setBusy(true);setError('');setCopied(false);setCopyError(false);
+    try{const next=await createPixPayment();localStorage.setItem(storageKey,next.id);acceptCharge(next);setNow(Date.now());}
+    catch(e){setError(e instanceof Error?e.message:'Não foi possível gerar o PIX.');}
+    finally{setBusy(false);}
+  };
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const keyInput = useRef<HTMLInputElement>(null);
+
+  const copyKey = async () => {
+    setCopied(false);
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(ready ? charge?.qrCode || '' : PIX_KEY);
+      setCopied(true);
+    } catch {
+      keyInput.current?.focus();
+      keyInput.current?.select();
+      setCopyError(true);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col p-6 animate-in fade-in duration-500">
-      <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full">
-        <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 text-center relative overflow-hidden">
-          <div className="absolute -top-10 -right-10 bg-indigo-500/10 w-40 h-40 rounded-full blur-3xl" />
-          
-          <div className="flex justify-center mb-6">
-            <div className="flex items-center gap-2">
-              <div className="bg-indigo-600 p-1.5 rounded-lg shadow-sm">
-                <Zap size={18} className="text-white fill-white" />
-              </div>
-              <span className="text-lg font-black text-slate-800 tracking-tighter italic">InfinitePay</span>
-            </div>
-          </div>
-
-          <h2 className="text-2xl font-black text-slate-800 mb-2 leading-tight">Renove seu Giro</h2>
-          <p className="text-slate-400 text-sm font-medium mb-8 leading-relaxed">
-            Seu corre não pode parar! Garanta mais 30 dias de controle total.
-          </p>
-
-          <div className="bg-indigo-50 rounded-3xl p-6 mb-8 border border-indigo-100/50">
-            <div className="flex items-baseline justify-center gap-1">
-              <span className="text-indigo-900 font-black text-4xl">R$ 12,99</span>
-              <span className="text-indigo-400 font-bold text-sm">/mês</span>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="py-12 flex flex-col items-center gap-4">
-              <Loader2 className="animate-spin text-indigo-600" size={32} />
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conectando Servidor...</p>
-            </div>
-          ) : error ? (
-            <div className="py-8 space-y-4">
-              <div className="bg-red-50 text-red-600 p-4 rounded-2xl flex items-center gap-3">
-                <AlertCircle size={20} />
-                <p className="text-xs font-bold text-left">{error}</p>
-              </div>
-              <button onClick={initPayment} className="text-indigo-600 text-xs font-black uppercase flex items-center gap-2 justify-center w-full">
-                <RefreshCw size={14} /> TENTAR NOVAMENTE
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-6 animate-in zoom-in-95 duration-300">
-              <div className="bg-slate-50 p-4 rounded-3xl flex flex-col items-center border border-slate-100">
-                <div className="bg-white p-3 rounded-2xl shadow-inner mb-4 border border-slate-200/50">
-                  <div className="w-[140px] h-[140px] bg-slate-50 flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200">
-                    <QrCode size={100} className="text-slate-300" />
-                  </div>
-                </div>
-                <button 
-                  onClick={handleCopyCode}
-                  className="w-full py-4 bg-white border border-slate-200 hover:border-indigo-500 text-slate-600 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
-                >
-                  {copied ? (
-                    <><CheckCircle2 size={16} className="text-emerald-500" /> COPIADO!</>
-                  ) : (
-                    <><Copy size={16} /> COPIAR CÓDIGO PIX</>
-                  )}
-                </button>
-              </div>
-
-              <div className="flex items-start gap-3 text-left bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
-                <ShieldCheck size={18} className="text-emerald-500 shrink-0 mt-0.5" />
-                <p className="text-[10px] font-medium text-emerald-700 leading-tight">
-                  A liberação é automática via InfinitePay. Se já pagou, aguarde alguns segundos ou clique abaixo.
-                </p>
-              </div>
-
-              <button 
-                disabled={verifying}
-                onClick={handleManualVerify}
-                className="w-full py-5 bg-slate-900 text-white font-black rounded-3xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                {verifying ? <Loader2 size={20} className="animate-spin" /> : 'VERIFICAR PAGAMENTO'}
-              </button>
-            </div>
-          )}
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center p-6">
+      <div className="w-full max-w-sm mx-auto bg-white rounded-[2.5rem] p-6 sm:p-8 shadow-sm border border-slate-100 text-center">
+        <div className="bg-orange-100 text-orange-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <Wallet size={30} aria-hidden="true" />
         </div>
-      </div>
-      
-      <div className="mt-8 text-center">
-        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">
-          InfinitePay • Chave fixa de suporte: gabrielferds044@gmail.com
-        </p>
+        <h2 className="text-2xl font-black text-slate-800 mb-2">{quote?.isTrial?'Ative seu Giro':'Renove seu Giro'}</h2>
+        <p className="text-slate-600 text-base mb-6">Pagamento por PIX</p>
+        <div className="bg-orange-50 rounded-3xl p-5 mb-6 border border-orange-100">
+          <span className="text-slate-900 font-black text-4xl">{amount.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</span>
+          <span className="text-slate-600 font-bold text-sm"> /30 dias</span>
+        </div>
+        <p className="text-sm text-slate-600 mb-5">Mais 30 dias de acesso. Cada renovação exige um novo pagamento.</p>
+        {(quoteEarly || (chargeValid && charge?.earlyRenewal)) && <p className="text-sm font-semibold text-emerald-700 mb-5">Desconto por renovação antecipada. Os 30 dias são somados ao vencimento atual.</p>}
+        {quote?.planExpiresAt && !quote.isTrial && <p className="text-sm text-slate-500 mb-5">Vencimento atual: {new Date(quote.planExpiresAt).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}. Novas cobranças no vencimento custam R$ 12,99.</p>}
+        {ready === null && <p role="status">Carregando opções de pagamento…</p>}
+        {ready && (!charge || expired || canceled) && <button disabled={busy} onClick={generate} className="w-full mb-4 py-4 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold rounded-2xl">{busy?'Gerando PIX…':charge?'Gerar novo PIX':'Gerar PIX com Mercado Pago'}</button>}
+        {ready && charge && <div className="mb-4" role="status">
+          <p className="font-semibold text-slate-700">{charge.activated?'Pagamento confirmado!':canceled?'Cobrança cancelada.':expired?'Este código venceu. Gere um novo PIX.':charge.status==='confirming'?'Pagamento recebido. Aguardando confirmação.':'Aguardando pagamento'}</p>
+          {!expired && !canceled && charge.qrCodeBase64 && <img className="mx-auto mt-4 w-56 h-56" alt="QR Code PIX do seu plano GiroCerto" src={`data:image/png;base64,${charge.qrCodeBase64}`} />}
+          {!expired && !canceled && <p className="text-sm text-slate-500 mt-3">Este PIX mantém o valor exibido até {new Date(charge.expiresAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}. A confirmação é verificada automaticamente.</p>}
+          {!expired && !canceled && !charge.qrCode && <p className="text-sm mt-3">Preparando o código de pagamento…</p>}
+        </div>}
+        {(ready === false || (ready && charge?.qrCode && !expired && !canceled)) && <>
+        <label htmlFor="girocerto-pix-key" className="block text-left text-sm font-bold text-slate-600 mb-2">{ready?'PIX Copia e Cola':'Chave PIX · e-mail'}</label>
+        <input
+          ref={keyInput}
+          id="girocerto-pix-key"
+          type="text"
+          value={ready ? charge?.qrCode || '' : PIX_KEY}
+          readOnly
+          spellCheck={false}
+          onClick={(event) => event.currentTarget.select()}
+          className="w-full min-w-0 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-4 text-base text-slate-800 font-semibold text-center focus:outline-none focus:ring-2 focus:ring-orange-500"
+        />
+        <button onClick={copyKey} className="w-full mt-4 py-4 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500">
+          {copied ? <CheckCircle2 size={20} aria-hidden="true" /> : <Copy size={20} aria-hidden="true" />}
+          {copied ? 'PIX copiado!' : ready ? 'Copiar código PIX' : 'Copiar chave PIX'}
+        </button>
+        <div aria-live="polite" className="text-sm mt-3">
+          {copied && <p className="text-emerald-700">{ready?'Cole na opção PIX Copia e Cola do seu banco.':'Cole na opção de pagar por chave PIX do seu banco.'}</p>}
+          {copyError && <p className="text-red-700">Não foi possível copiar automaticamente. A chave está selecionada: copie manualmente.</p>}
+        </div>
+        </>}
+        {error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}
+        {ready === false && <>
+          <p className="text-left text-sm text-slate-600 mt-6 leading-relaxed">No seu banco, escolha PIX, cole a chave e informe o valor acima. Confira o nome do recebedor antes de confirmar.</p>
+          <p className="text-left text-sm text-slate-500 mt-3 leading-relaxed">Nesta opção, a confirmação do pagamento e a liberação são manuais. O pagamento automático está em configuração.</p>
+        </>}
+        {ready && <p className="text-left text-sm text-slate-500 mt-6 leading-relaxed">Pague somente o código gerado acima para receber a liberação automática. Transferências para a chave de e-mail exigem confirmação manual.</p>}
       </div>
     </div>
   );
