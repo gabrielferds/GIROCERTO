@@ -7,23 +7,7 @@ import { PixPaymentResponse } from '../types';
  */
 
 export const createPixPayment = async (userId: string, email: string): Promise<PixPaymentResponse> => {
-  try {
-    const response = await fetch('/api/create-pix', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, email }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Erro ao conectar com a API de pagamentos.');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error("Erro ao gerar PIX:", error);
-    throw error;
-  }
+  throw new Error('Pagamento PIX ainda não disponível. A integração de cobrança precisa ser concluída.');
 };
 
 export const checkPaymentStatus = async (paymentId: string): Promise<string> => {

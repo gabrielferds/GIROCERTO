@@ -25,7 +25,7 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
       const resp = await createPixPayment(userId, userEmail);
       setPaymentData(resp);
     } catch (err) {
-      setError("Erro ao gerar PIX com InfinitePay. Tente novamente.");
+      setError(err instanceof Error ? err.message : "Pagamento indisponível.");
     } finally {
       setLoading(false);
     }
@@ -157,7 +157,7 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({ userId, userName, userEma
       
       <div className="mt-8 text-center">
         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-4">
-          InfinitePay • Chave fixa de suporte: gabrielferds044@gmail.com
+          Pagamento disponível após configurar o provedor de cobrança.
         </p>
       </div>
     </div>

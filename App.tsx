@@ -33,6 +33,30 @@ const App: React.FC = () => {
   const [planStatus, setPlanStatus] = useState<PlanStatus>('trial');
   const [isExpired, setIsExpired] = useState(false);
 
+  useEffect(() => {
+    const context = (document as any).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    try {
+      void Promise.resolve(context.registerTool({
+        name: 'open_girocerto_view',
+        title: 'Abrir uma tela do GiroCerto',
+        description: 'Abre uma tela para o usuário autenticado. Não salva nem exclui registros.',
+        inputSchema: { type: 'object', properties: { view: { type: 'string', enum: ['dashboard','calendar','history','add','goals','maintenance','debts','insights'] } }, required: ['view'], additionalProperties: false },
+        annotations: { readOnlyHint: false },
+        execute: async (input: any) => {
+          const views = ['dashboard','calendar','history','add','goals','maintenance','debts','insights'];
+          if (!input || !views.includes(input.view)) throw new Error('Tela inválida.');
+          if (!isAuthComplete) throw new Error('Entre na sua conta primeiro.');
+          setActiveView(input.view);
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return { view: input.view };
+        }
+      }, { signal: lifecycle.signal })).catch(console.error);
+    } catch (error) { console.error(error); }
+    return () => lifecycle.abort();
+  }, [isAuthComplete]);
+
   // Auth Session Management
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -40,7 +64,7 @@ const App: React.FC = () => {
         setUserId(session.user.id);
         setUserEmail(session.user.email || '');
         setIsAuthComplete(true);
-        fetchUserData(session.user.id);
+        setTimeout(() => { void fetchUserData(session.user.id); }, 0);
       } else {
         setUserId(null);
         setIsAuthComplete(false);
@@ -55,7 +79,7 @@ const App: React.FC = () => {
     // 1. Profile
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single();
     if (profile) {
-      setUserName(profile.name);
+      setUserName(profile.name || 'Motoboy');
       setPlannedWorkDays(profile.planned_work_days);
       setPlanStatus(profile.plan_status || 'trial');
       
@@ -68,7 +92,7 @@ const App: React.FC = () => {
             setPlanStatus('expired');
           }
         }
-      } else {
+      } else if (profile.trial_expires_at) {
         const trialExpiresAt = parseISO(profile.trial_expires_at);
         if (isBefore(trialExpiresAt, now)) {
           setIsExpired(true);
@@ -219,8 +243,8 @@ const App: React.FC = () => {
     };
   }, [entries, maintenanceItems, bikeInfo, replacementGoal, plannedWorkDays, debts]);
 
-  if (isAuthComplete === null) return null;
-  if (!isAuthComplete) return <InitialFlow onComplete={() => setIsAuthComplete(true)} />;
+  if (isAuthComplete === null) return <div className="min-h-screen flex items-center justify-center text-slate-600" role="status">Carregando seu Giro…</div>;
+  if (!isAuthComplete) return <InitialFlow onComplete={() => { void supabase.auth.getSession().then(({ data }) => setIsAuthComplete(Boolean(data.session))); }} />;
   
   if (isExpired && userId && activeView === 'add') {
     return <PaymentScreen userId={userId} userName={userName} userEmail={userEmail} onPaymentSuccess={handlePaymentSuccess} />;

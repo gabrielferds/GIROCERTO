@@ -62,7 +62,13 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
 
       if (signUpError) throw signUpError;
 
-      if (data.user) {
+      if (data.user && !data.session) {
+        setStep('login');
+        setError('Conta criada. Confirme seu e-mail antes de entrar.');
+        return;
+      }
+
+      if (data.user && data.session) {
         // Trial expires in 30 days
         const trialExpiresAt = addDays(new Date(), 30).toISOString();
 
@@ -77,7 +83,7 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
             trial_expires_at: trialExpiresAt
           });
           
-        if (profileError) console.error("Erro ao criar perfil:", profileError);
+        if (profileError) throw new Error("Sua conta foi criada, mas não foi possível salvar o perfil. Entre novamente para verificar a conexão com o banco.");
         setStep('onboarding');
       }
     } catch (err: any) {
