@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Copy, CheckCircle2, Wallet } from 'lucide-react';
 import { PIX_KEY } from '../config/payment';
-import { paymentConfiguration, createPixPayment, checkPaymentStatus, PixCharge } from '../services/paymentService';
+import { paymentConfiguration, createPixPayment, checkPaymentStatus, PixCharge, PlanQuote } from '../services/paymentService';
 
 interface PaymentScreenProps {
   userId: string;
@@ -12,6 +12,7 @@ interface PaymentScreenProps {
 
 const PaymentScreen: React.FC<PaymentScreenProps> = ({userId,onPaymentSuccess}) => {
   const [ready,setReady] = useState<boolean | null>(null);
+  const [quote,setQuote] = useState<PlanQuote|null>(null);
   const [charge,setCharge] = useState<PixCharge | null>(null);
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
@@ -22,6 +23,9 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({userId,onPaymentSuccess}) 
   const storageKey = `girocerto:pix:${userId}`;
   const expired = Boolean(charge && new Date(charge.expiresAt).getTime() <= now);
   const canceled = ['canceled','failed','expired'].includes(charge?.status || '');
+  const chargeValid=Boolean(charge && !expired && !canceled && !charge.activated);
+  const quoteEarly=Boolean(quote?.earlyRenewal && quote.planExpiresAt && new Date(quote.planExpiresAt).getTime()>now);
+  const amount=chargeValid?charge!.amount:quoteEarly?10:12.99;
   const acceptCharge = (next:PixCharge) => {
     setCharge(next);
     if(next.activated) { localStorage.removeItem(storageKey); success.current(); }
@@ -31,6 +35,7 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({userId,onPaymentSuccess}) 
     paymentConfiguration().then(async config=>{
       if(!mounted)return;
       setReady(config.ready);
+      setQuote(config);
       const id=localStorage.getItem(storageKey);
       if(config.ready && id){
         try{ const existing=await checkPaymentStatus(id); if(mounted) acceptCharge(existing); }
@@ -38,6 +43,10 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({userId,onPaymentSuccess}) 
       }
     }).catch(()=>{if(mounted){setReady(false);setError('Não foi possível consultar o pagamento automático. Tente atualizar a página.');}});
     return ()=>{mounted=false;};
+  },[userId]);
+  useEffect(()=>{
+    const timer=window.setInterval(()=>{setNow(Date.now());void paymentConfiguration().then(config=>{setReady(config.ready);setQuote(config);}).catch(()=>{});},60000);
+    return ()=>window.clearInterval(timer);
   },[userId]);
   useEffect(()=>{
     if(!charge || charge.activated || canceled)return;
@@ -83,19 +92,21 @@ const PaymentScreen: React.FC<PaymentScreenProps> = ({userId,onPaymentSuccess}) 
         <div className="bg-orange-100 text-orange-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6">
           <Wallet size={30} aria-hidden="true" />
         </div>
-        <h2 className="text-2xl font-black text-slate-800 mb-2">Renove seu Giro</h2>
+        <h2 className="text-2xl font-black text-slate-800 mb-2">{quote?.isTrial?'Ative seu Giro':'Renove seu Giro'}</h2>
         <p className="text-slate-600 text-base mb-6">Pagamento por PIX</p>
         <div className="bg-orange-50 rounded-3xl p-5 mb-6 border border-orange-100">
-          <span className="text-slate-900 font-black text-4xl">R$ 12,99</span>
-          <span className="text-slate-600 font-bold text-sm"> /mês</span>
+          <span className="text-slate-900 font-black text-4xl">{amount.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</span>
+          <span className="text-slate-600 font-bold text-sm"> /30 dias</span>
         </div>
         <p className="text-sm text-slate-600 mb-5">Mais 30 dias de acesso. Cada renovação exige um novo pagamento.</p>
+        {(quoteEarly || (chargeValid && charge?.earlyRenewal)) && <p className="text-sm font-semibold text-emerald-700 mb-5">Desconto por renovação antecipada. Os 30 dias são somados ao vencimento atual.</p>}
+        {quote?.planExpiresAt && !quote.isTrial && <p className="text-sm text-slate-500 mb-5">Vencimento atual: {new Date(quote.planExpiresAt).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}. Novas cobranças no vencimento custam R$ 12,99.</p>}
         {ready === null && <p role="status">Carregando opções de pagamento…</p>}
         {ready && (!charge || expired || canceled) && <button disabled={busy} onClick={generate} className="w-full mb-4 py-4 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold rounded-2xl">{busy?'Gerando PIX…':charge?'Gerar novo PIX':'Gerar PIX com Mercado Pago'}</button>}
         {ready && charge && <div className="mb-4" role="status">
           <p className="font-semibold text-slate-700">{charge.activated?'Pagamento confirmado!':canceled?'Cobrança cancelada.':expired?'Este código venceu. Gere um novo PIX.':charge.status==='confirming'?'Pagamento recebido. Aguardando confirmação.':'Aguardando pagamento'}</p>
           {!expired && !canceled && charge.qrCodeBase64 && <img className="mx-auto mt-4 w-56 h-56" alt="QR Code PIX do seu plano GiroCerto" src={`data:image/png;base64,${charge.qrCodeBase64}`} />}
-          {!expired && !canceled && <p className="text-sm text-slate-500 mt-3">Válido até {new Date(charge.expiresAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}. A confirmação é verificada automaticamente.</p>}
+          {!expired && !canceled && <p className="text-sm text-slate-500 mt-3">Este PIX mantém o valor exibido até {new Date(charge.expiresAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}. A confirmação é verificada automaticamente.</p>}
           {!expired && !canceled && !charge.qrCode && <p className="text-sm mt-3">Preparando o código de pagamento…</p>}
         </div>}
         {(ready === false || (ready && charge?.qrCode && !expired && !canceled)) && <>

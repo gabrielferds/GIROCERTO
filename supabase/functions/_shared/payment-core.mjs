@@ -1,14 +1,14 @@
-export const PRICE = '12.99';
 export function isPaidOrder(order, charge) {
   const payment = order.transactions?.payments?.[0];
-  return order.id === charge.provider_order_id && order.external_reference === charge.id &&
+  const expected = Number(charge.amount);
+  return [10,12.99].includes(expected) && order.id === charge.provider_order_id && order.external_reference === charge.id &&
     order.type === 'online' && order.country_code === 'BRA' &&
     (!order.currency_id || order.currency_id === 'BRL') &&
     order.status === 'processed' && order.status_detail === 'accredited' &&
-    Number(order.total_amount) === Number(PRICE) && Number(order.total_paid_amount) === Number(PRICE) &&
+    Number(order.total_amount) === expected && Number(order.total_paid_amount) === expected &&
     payment?.status === 'processed' && payment.status_detail === 'accredited' &&
-    payment.payment_method?.id === 'pix' && Number(payment.amount) === Number(PRICE) &&
-    Number(payment.paid_amount) === Number(PRICE);
+    payment.payment_method?.id === 'pix' && Number(payment.amount) === expected &&
+    Number(payment.paid_amount) === expected;
 }
 export async function verifySignature(signature, requestId, dataId, secret) {
   if (!signature || !requestId || !dataId || !secret) return false;

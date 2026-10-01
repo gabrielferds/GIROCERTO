@@ -12,7 +12,11 @@ Deno.serve(async req=>{
   const {data:{user},error:authError}=await admin.auth.getUser(token);
   if(authError||!user?.email) return json({error:'Sua sessão expirou. Entre novamente.'},401);
   const body=await req.json();
-  if(body.action==='config') return json({ready:ready()});
+  if(body.action==='config') {
+    const {data:quote,error}=await admin.rpc('gc_payment_quote',{p_user_id:user.id});
+    if(error) throw new Error('Não foi possível consultar seu plano.');
+    return json({ready:ready(),...quote});
+  }
   if(!ready()) return json({error:'O pagamento automático está em configuração.'},503);
   if(body.action==='status'){
     const {data:charge,error}=await admin.from('gc_payments').select('*').eq('id',body.id).eq('user_id',user.id).maybeSingle();
@@ -35,9 +39,10 @@ Deno.serve(async req=>{
     charge=data;
     if(charge.provider_order_id) return json(publicCharge(await syncCharge(charge)));
   }
+  const amount=Number(charge.amount).toFixed(2);
   const order=await provider('/v1/orders',{method:'POST',headers:{'X-Idempotency-Key':charge.id},body:JSON.stringify({
-    type:'online',total_amount:'12.99',external_reference:charge.id,processing_mode:'automatic',
-    transactions:{payments:[{amount:'12.99',payment_method:{id:'pix',type:'bank_transfer'},expiration_time:'PT30M'}]},
+    type:'online',total_amount:amount,external_reference:charge.id,processing_mode:'automatic',
+    transactions:{payments:[{amount,payment_method:{id:'pix',type:'bank_transfer'},expiration_time:'PT30M'}]},
     payer:{email:user.email}})});
   if(!/^ORD[A-Z0-9]+$/i.test(order.id||'')||order.external_reference!==charge.id) throw new Error('Resposta de cobrança inválida.');
   const method=order.transactions?.payments?.[0]?.payment_method;

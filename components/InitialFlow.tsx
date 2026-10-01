@@ -239,7 +239,7 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
 
             <div className="space-y-4 mb-10 text-left">
               {[
-                "30 dias de teste gratuito",
+                "3 dias de teste gratuito após o cadastro",
                 "Dashboards de lucro real",
                 "Metas inteligentes ilimitadas",
                 "Controle de dívidas e boletos",
@@ -258,11 +258,12 @@ const InitialFlow: React.FC<InitialFlowProps> = ({ onComplete }) => {
               <p className="text-slate-400 text-xs font-bold uppercase mb-1">Após o teste:</p>
               <div className="flex items-baseline justify-center gap-1">
                 <span className="text-slate-900 font-black text-4xl">R$ 12,99</span>
-                <span className="text-slate-400 font-bold text-sm">/mês</span>
+                <span className="text-slate-400 font-bold text-sm">/30 dias</span>
               </div>
               <p className="text-[10px] text-orange-500 font-black uppercase mt-3 tracking-widest">
-                AVISAREMOS ANTES DE QUALQUER COBRANÇA
+                RENOVE POR R$ 10,00 NOS ÚLTIMOS 2 DIAS DO PLANO
               </p>
+              <p className="text-xs text-slate-500 mt-3">Primeiro pagamento: R$ 12,99. No vencimento, a renovação custa R$ 12,99. Pagamento por PIX, sem débito automático.</p>
             </div>
           </div>
         </div>

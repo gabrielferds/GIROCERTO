@@ -1,6 +1,8 @@
 # Mercado Pago no GiroCerto
 
-Aplicação: `7087419125626531`. Cobrança PIX avulsa de R$12,99 para mais 30 dias; não é débito recorrente automático.
+Aplicação: `7087419125626531`. Novos cadastros recebem 72 horas grátis. Primeiro pagamento: R$12,99 por 30 dias exatos (720 horas). A partir do 28º dia do ciclo pago, a tela mostra um aviso e oferece renovação por R$10,00. A renovação antecipada acrescenta 30 dias ao vencimento vigente; no vencimento, novas cobranças custam R$12,99. Pagamento após o vencimento inicia 30 dias a partir do pagamento. Não há débito recorrente automático.
+
+Um PIX já emitido conserva o preço por 30 minutos, mesmo se o vencimento do plano ocorrer nesse intervalo. O valor é definido no servidor e conferido contra o pagamento do provedor. O vencimento e o preço da cobrança aparecem na tela. Os avisos são dentro do app; não foram configurados e-mail, WhatsApp ou push com o app fechado. Prazos de teste anteriormente concedidos são preservados.
 
 ## Configuração pelo proprietário
 
@@ -26,4 +28,4 @@ As funções antigas em `api/`, `functions/api/` e `netlify/functions/` não faz
 
 ## Verificação
 
-`node --test tests/payment-core.test.mjs`, `npx tsc --noEmit`, `npm run build`. A migração está em `db/girocerto-mercadopago.sql`; as Edge Functions estão em `supabase/functions/`.
+`node --test tests/*.test.mjs`, `npx tsc --noEmit`, `npm run build`. Migrações: `db/girocerto-mercadopago.sql` e `db/girocerto-trial-and-renewal.sql`. Edge Functions: `supabase/functions/`. Renovação, valores, 72 horas grátis e limites do desconto são verificados com transações SQL revertidas. O banco também bloqueia gravações de dados financeiros após expirar, mantendo a leitura do histórico.

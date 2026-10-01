@@ -11,6 +11,8 @@ import DebtManager from './components/DebtManager';
 import NotificationOverlay from './components/NotificationOverlay';
 import InitialFlow from './components/InitialFlow';
 import PaymentScreen from './components/PaymentScreen';
+import PlanNotice from './components/PlanNotice';
+import { planTiming } from './services/billingPolicy.mjs';
 import { supabase } from './services/supabase';
 import * as db from './services/dataService';
 import { format, startOfMonth, endOfMonth, parseISO, subDays, isAfter, isBefore } from 'date-fns';
@@ -32,10 +34,20 @@ const App: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string>('');
   const [userId, setUserId] = useState<string | null>(null);
   const [planStatus, setPlanStatus] = useState<PlanStatus>('trial');
-  const [isExpired, setIsExpired] = useState(false);
+  const [planExpiresAt,setPlanExpiresAt] = useState<string|null>(null);
+  const [isFirstMonth,setIsFirstMonth] = useState(true);
+  const [clock,setClock] = useState(Date.now());
+  const isExpired = planTiming(planExpiresAt,isFirstMonth,clock).expired;
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(()=>{
+    const tick=()=>setClock(Date.now());
+    const timer=window.setInterval(tick,30000);
+    window.addEventListener('focus',tick);
+    return ()=>{window.clearInterval(timer);window.removeEventListener('focus',tick);};
+  },[]);
 
 
   useEffect(() => {
@@ -73,7 +85,7 @@ const App: React.FC = () => {
       } else {
         setUserId(null);
         setIsAuthComplete(false);
-        setIsExpired(false);
+        setPlanExpiresAt(null);
       }
     });
 
@@ -89,7 +101,9 @@ const App: React.FC = () => {
       setPlannedWorkDays(data.profile.planned_work_days);
       const expiry = data.profile.plan_expiry_date;
       const expired = Boolean(expiry && isBefore(parseISO(expiry), new Date()));
-      setIsExpired(expired);
+      setPlanExpiresAt(expiry || null);
+      setIsFirstMonth(data.profile.is_first_month !== false);
+      setClock(Date.now());
       setPlanStatus(expired ? 'expired' : (data.profile.plan_status || 'trial'));
       setEntries(data.entries); setMaintenanceItems(data.maintenance);
       setBikeInfo(data.bike as BikeInfo | null);
@@ -190,25 +204,6 @@ const App: React.FC = () => {
       case 'dashboard':
         return (
           <div className="space-y-4 animate-in fade-in duration-500">
-            {isExpired && (
-              <div className="bg-red-50 p-4 rounded-3xl border border-red-100 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="bg-red-500 p-2 rounded-xl text-white shadow-sm">
-                    <AlertCircle size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black text-red-900 leading-tight">Plano Expirado</p>
-                    <p className="text-[10px] font-medium text-red-600">Renove para lançar novos ganhos.</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setActiveView('payment')}
-                  className="bg-red-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all shadow-sm shadow-red-200"
-                >
-                  RENOVAR
-                </button>
-              </div>
-            )}
             <div className="flex justify-between items-end mb-2 px-1">
               <div className="flex flex-col gap-1">
                 <span className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Salve, {userName.split(' ')[0]}!</span>
@@ -357,6 +352,7 @@ const App: React.FC = () => {
       <NotificationOverlay entries={entries} onAction={() => setActiveView('add')} />
       {dataError && <div role="alert" className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-2xl mb-4 text-sm">{dataError}<button className="ml-3 underline font-bold" onClick={() => userId && void fetchUserData(userId)}>Recarregar dados</button></div>}
       {(dataLoading || saving) && <p role="status" className="text-sm text-slate-500 mb-3">{saving ? 'Salvando…' : 'Carregando seus dados…'}</p>}
+      {!dataLoading && activeView!=='payment' && <PlanNotice expiresAt={planExpiresAt} isFirstMonth={isFirstMonth} now={clock} onPay={()=>setActiveView('payment')} />}
       <div aria-busy={dataLoading || saving} className={dataLoading || saving ? 'pointer-events-none opacity-60' : ''}>{renderContent()}</div>
     </Layout>
   );

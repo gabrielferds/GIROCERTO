@@ -20,6 +20,11 @@ export async function syncCharge(charge:any, signedWebhook=false) {
   const updates:any = {};
   if (method?.qr_code) updates.qr_code = method.qr_code;
   if (method?.qr_code_base64) updates.qr_code_base64 = method.qr_code_base64;
+  if (isPaidOrder(order,charge) && !charge.paid_at && order.last_updated_date) {
+    const paidAt = new Date(order.last_updated_date);
+    if (Number.isNaN(paidAt.getTime())) throw new Error('Data do pagamento inválida.');
+    updates.paid_at = paidAt.toISOString();
+  }
   // Only a validated webhook can unlock a plan. Polling can complete an earlier
   // signed webhook whose order was still processing at the time of delivery.
   if (signedWebhook) updates.webhook_received_at = new Date().toISOString();
@@ -36,6 +41,7 @@ export async function syncCharge(charge:any, signedWebhook=false) {
   if (error) throw new Error('Não foi possível consultar a cobrança.');
   return data;
 }
-export const publicCharge = (charge:any) => ({id:charge.id,status:charge.status,amount:12.99,
+export const publicCharge = (charge:any) => ({id:charge.id,status:charge.status,amount:Number(charge.amount),
+  earlyRenewal:charge.pricing_kind==='early_renewal',
   qrCode:charge.qr_code,qrCodeBase64:charge.qr_code_base64,expiresAt:charge.expires_at,
   activated:Boolean(charge.activated_at)});
